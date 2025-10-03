@@ -1,0 +1,753 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Расчет БРУТТО-ЗП по Схеме Смен</title>
+    <!-- Загрузка Tailwind CSS и конфигурация Dark Mode -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            // Активируем Dark Mode на основе системных настроек (Telegram использует их)
+            darkMode: 'media', 
+            theme: {
+                extend: {
+                    colors: {
+                        // Телеграм-похожие цвета для адаптивного дизайна
+                        tg_bg_light: '#F3F4F6', // Светлый фон приложения (почти белый)
+                        tg_bg_dark: '#182025',  // Темный фон приложения (темно-синий/серый)
+                        tg_card_light: '#FFFFFF', // Светлый фон карточек
+                        tg_card_dark: '#212D3A', // Темный фон карточек
+                        tg_accent: '#2563EB',   // Основной акцентный синий (blue-600)
+                        tg_dark_accent: '#3B82F6', // Акцентный синий в темной теме (blue-500)
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        /* Настройка шрифта Inter и общих стилей */
+        @import url('https://fonts.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            padding: 12px; 
+            /* Основной фон задан через Tailwind, чтобы работать с Dark Mode */
+        }
+        .app-container {
+            max-width: 480px; 
+        }
+        .card {
+            /* Скругления и тени в стиле Telegram */
+            border-radius: 16px; 
+            padding: 24px; 
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+        }
+
+        /* Стиль для инпутов: адаптивные границы и фон */
+        input[type="number"], select {
+            border-width: 1px;
+            transition: all 0.2s;
+            border-radius: 12px; 
+        }
+        
+        /* Light Mode Input/Select styles */
+        input[type="number"], select {
+            border-color: #E5E7EB;
+            background-color: #FFFFFF;
+            color: #1F2937;
+        }
+        input[type="number"]:focus, select:focus {
+            border-color: #4f46e5; 
+            box-shadow: 0 0 0 2px #c7d2fe;
+            outline: none;
+        }
+
+        /* Dark Mode Input/Select styles */
+        .dark input[type="number"], .dark select {
+            border-color: #4B5563; /* gray-600 */
+            background-color: #1F2937; /* dark input bg */
+            color: #E5E7EB;
+        }
+        .dark input[type="number"]:focus, .dark select:focus {
+            border-color: #3B82F6; 
+            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.5); 
+        }
+
+        /* Акцентный цвет для заголовков */
+        .header-accent {
+            color: #2563EB; /* tg_accent */
+        }
+        .dark .header-accent {
+            color: #3B82F6; /* tg_dark_accent */
+        }
+
+        /* Календарь и Дни: Адаптивные стили */
+        .calendar-grid {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            gap: 4px;
+        }
+        .calendar-day {
+            padding: 8px 0;
+            text-align: center;
+            border-radius: 8px; 
+            cursor: pointer;
+            transition: background-color 0.1s;
+            position: relative;
+            font-weight: 500;
+        }
+        .calendar-day:not(.day-empty):hover {
+            background-color: #f0f0f0;
+        }
+        .dark .calendar-day:not(.day-empty):hover {
+            background-color: #374151; /* Dark hover */
+        }
+        .day-selected {
+            border: 2px solid #2563EB; 
+            color: #1f2937 !important;
+            background-color: #EFF6FF !important; /* blue-50 */
+        }
+        .dark .day-selected {
+            border-color: #3B82F6; 
+            color: #E5E7EB !important;
+            background-color: #1E3A8A !important; /* blue-900 */
+        }
+        
+        /* Адаптивная Цветовая палитра для смен (Light/Dark) */
+        /* Дневная - Зеленый */
+        .shift-0 { background-color: #e5faed; color: #16a34a; } 
+        .dark .shift-0 { background-color: #103C26; color: #6EE7B7; } 
+        /* Ночная - Синий */
+        .shift-1 { background-color: #e0f2fe; color: #2563eb; } 
+        .dark .shift-1 { background-color: #14356E; color: #60A5FA; } 
+        /* Отсыпной - Фиолетовый */
+        .shift-2 { background-color: #f3e8ff; color: #7c3aed; } 
+        .dark .shift-2 { background-color: #3A236F; color: #C4B5FD; }
+        /* Выходной - Серый */
+        .shift-3 { background-color: #f1f5f9; color: #64748b; } 
+        .dark .shift-3 { background-color: #374151; color: #9CA3AF; } 
+        
+        /* Остальные стили для таблиц и итоговой суммы */
+        .calc-table td:nth-child(1) { padding-right: 8px; }
+        .calc-table td:nth-child(2) { text-align: right; font-weight: 600; white-space: nowrap; }
+        #hourlyGrossSalaryResult { font-size: 2.25rem; line-height: 2.5rem; }
+        .schedule-table-date { width: 80px; white-space: nowrap; }
+        .schedule-table-shift { width: auto; }
+
+    </style>
+</head>
+<body class="bg-tg_bg_light dark:bg-tg_dark_bg transition-colors duration-300">
+
+<div class="app-container p-4 flex flex-col gap-6 w-full mx-auto min-h-screen relative">
+    <h1 class="text-3xl font-extrabold text-gray-900 dark:text-gray-100 text-center mt-4 mb-2">Калькулятор БРУТТО-ЗП</h1>
+    <p class="text-center text-sm text-gray-500 dark:text-gray-400 -mt-2">Расчет начислений по сменному графику</p>
+
+    <!-- 1. Ставка и параметры -->
+    <div class="card bg-tg_card_light dark:bg-tg_card_dark transition-colors duration-300 shadow-md dark:shadow-none dark:border dark:border-gray-700">
+        <h2 class="text-xl font-bold mb-5 text-gray-800 dark:text-gray-200 border-b dark:border-gray-700 pb-2">1. Ставка и параметры</h2>
+        
+        <!-- Ввод часов за смену -->
+        <div class="mb-4">
+            <label for="hoursPerShiftInput" class="block text-sm font-medium text-gray-600 dark:text-gray-400 mb-2">Часов за смену (рабочие дни):</label>
+            <div class="flex items-center space-x-2">
+                <input 
+                    type="number"
+                    id="hoursPerShiftInput" 
+                    value="11" 
+                    placeholder="11"
+                    class="w-full p-3"
+                    min="1" 
+                    oninput="updateHoursAndRecalculate()"
+                />
+                <span class="text-lg font-medium text-gray-500 dark:text-gray-400 flex-shrink-0">часов</span>
+            </div>
+        </div>
+
+        <!-- Ввод часовой ставки -->
+        <div class="mb-6">
+            <label for="hourlyRateInput" class="block text-sm font-medium text-gray-600 dark:text-gray-400 mb-2">Часовая ставка (1.0x):</label>
+            <div class="flex items-center space-x-2">
+                <input 
+                    type="number"
+                    id="hourlyRateInput" 
+                    value="1720" 
+                    placeholder="1720"
+                    class="w-full p-3"
+                    min="0" 
+                    oninput="updateCalculations()"
+                />
+                <span class="text-lg font-medium text-gray-500 dark:text-gray-400 flex-shrink-0">тг/час</span>
+            </div>
+        </div>
+
+        <div id="shiftCostSummary" class="mt-4 p-3 bg-indigo-50 dark:bg-gray-800 rounded-xl text-sm space-y-2 border border-indigo-200 dark:border-gray-700">
+            <!-- Сюда будут выводиться расчеты ставок -->
+            <p id="dayShiftCost" class="font-medium text-gray-700 dark:text-gray-300"></p>
+            <p id="nightShiftCost" class="font-medium text-gray-700 dark:text-gray-300"></p>
+        </div>
+    </div>
+
+    <!-- 2. График и старт цикла -->
+    <div class="card bg-tg_card_light dark:bg-tg_card_dark transition-colors duration-300 shadow-md dark:shadow-none dark:border dark:border-gray-700">
+        <h2 class="text-xl font-bold mb-5 text-gray-800 dark:text-gray-200 border-b dark:border-gray-700 pb-2">2. График и старт цикла</h2>
+        
+        <!-- Выбор схемы смены -->
+        <div class="mb-4">
+            <label for="shiftSchemeSelector" class="block text-sm font-medium text-gray-600 dark:text-gray-400 mb-2">Выберите схему смены:</label>
+            <select 
+                id="shiftSchemeSelector" 
+                class="w-full p-3" 
+                onchange="applySchemeDefaults(); clearOverrides(); updateCalculations();"
+            >
+                <option value="2/2_DNOW">2/2 (Д,Н,О,В) - 11ч</option>
+                <option value="5/2_D">5/2 (Д,Д,Д,Д,Д,В,В) - 8ч</option>
+                <option value="2/2_DDVV">2/2 (Д,Д,В,В) - 11ч</option>
+            </select>
+        </div>
+        
+        <!-- Выбор начальной даты цикла -->
+        <div class="mb-3 relative">
+            <label for="startDateDisplay" class="block text-sm font-medium text-gray-600 dark:text-gray-400 mb-2">Дата, с которой начинается цикл:</label>
+            <div 
+                id="startDateDisplay" 
+                class="w-full p-3 border border-gray-200 dark:border-gray-600 rounded-xl cursor-pointer text-lg text-center bg-gray-50 dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600 transition font-semibold text-gray-700 dark:text-gray-200"
+                onclick="toggleCalendar()"
+            >
+                <!-- Форматированная дата будет здесь -->
+            </div>
+            <input type="hidden" id="startDateInput" value="">
+            
+            <!-- Кастомный календарь-модаль -->
+            <div id="calendarContainer" class="absolute w-full z-50 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-2xl shadow-2xl mt-2 p-4 hidden">
+                <div class="flex justify-between items-center mb-3">
+                    <button class="text-tg_accent dark:text-tg_dark_accent p-2 rounded-full hover:bg-indigo-50 dark:hover:bg-gray-700 transition" onclick="changeMonth(-1)">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clip-rule="evenodd" /></svg>
+                    </button>
+                    <span id="calendarMonthYear" class="font-bold text-gray-700 dark:text-gray-200 text-lg"></span>
+                    <button class="text-tg_accent dark:text-tg_dark_accent p-2 rounded-full hover:bg-indigo-50 dark:hover:bg-gray-700 transition" onclick="changeMonth(1)">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd" /></svg>
+                    </button>
+                </div>
+                <div id="calendarWeekdays" class="calendar-grid text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">
+                    <span>Пн</span><span>Вт</span><span>Ср</span><span>Чт</span><span>Пт</span><span>Сб</span><span>Вс</span>
+                </div>
+                <div id="calendarDays" class="calendar-grid text-sm">
+                    <!-- Дни будут здесь -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 3. Сводный отчет -->
+    <div class="card bg-tg_card_light dark:bg-tg_card_dark transition-colors duration-300 shadow-md dark:shadow-none dark:border dark:border-gray-700">
+        <h2 class="text-xl font-bold mb-5 text-gray-800 dark:text-gray-200 border-b dark:border-gray-700 pb-2">3. Сводный отчет за <span id="currentMonthName" class="header-accent">Месяц</span></h2>
+        
+        <!-- Часть А: Сводка часов и смен -->
+        <h3 class="font-semibold text-gray-700 dark:text-gray-300 mb-3">Сводка по часам и сменам:</h3>
+        <div class="space-y-3 text-gray-700 dark:text-gray-300 mb-5 p-3 border border-gray-100 dark:border-gray-600 rounded-xl bg-gray-50 dark:bg-gray-800">
+            <!-- Общие смены -->
+            <div class="flex justify-between items-center text-md font-bold">
+                <span class="flex-shrink-0">🗓️ Общее количество смен:</span>
+                <span id="totalShifts" class="text-xl text-gray-800 dark:text-gray-100 font-extrabold flex-shrink-0">0</span>
+            </div>
+            <!-- Детализация смен -->
+            <div class="ml-2 space-y-1">
+                <p class="flex justify-between items-center text-sm">
+                    <span class="pr-2">☀️ Дневных смен (1.0):</span>
+                    <span id="dayShiftsCount" class="font-semibold flex-shrink-0 text-green-600 dark:text-green-400">0</span>
+                </p>
+                <p class="flex justify-between items-center text-sm">
+                    <span class="pr-2">🌙 Ночных смен (1.5):</span>
+                    <span id="nightShiftsCount" class="font-semibold flex-shrink-0 text-blue-600 dark:text-blue-400">0</span>
+                </p>
+            </div>
+            
+            <hr class="border-t border-gray-200 dark:border-gray-700 my-2">
+            
+            <!-- Детализация часов -->
+            <div class="ml-2 space-y-1">
+                <p class="flex justify-between items-center text-sm font-medium">
+                    <span class="pr-2">⏱️ Всего часов (1.0x):</span>
+                    <span id="totalPaidHours" class="font-semibold text-gray-700 dark:text-gray-300 flex-shrink-0">0</span>
+                </p>
+                <p class="flex justify-between items-center text-sm font-medium">
+                    <span class="pr-2">🌃 Часы надбавки (0.5x):</span>
+                    <span id="totalNightHours1_5" class="font-semibold text-gray-700 dark:text-gray-300 flex-shrink-0">0</span>
+                </p>
+            </div>
+        </div>
+        
+        <!-- Часть В: Детализация начислений (БРУТТО) -->
+        <h3 class="font-semibold text-gray-700 dark:text-gray-300 mb-3 border-b dark:border-gray-700 pb-1">Детализация начислений (БРУТТО):</h3>
+        <table class="w-full text-sm calc-table mb-6">
+            <tbody class="text-gray-700 dark:text-gray-300">
+                <tr>
+                    <td class="p-1 pl-3">Базовый заработок (Все часы, 1.0x):</td>
+                    <td id="earningBase" class="p-1">0 тг</td>
+                </tr>
+                <tr>
+                    <td class="p-1 pl-3">Ночная надбавка (0.5x):</td>
+                    <td id="earningNightPremium" class="p-1">0 тг</td>
+                </tr>
+            </tbody>
+        </table>
+        
+        <!-- Часть С: Итоговый результат - выделенный блок (АДАПТИВНЫЙ КРАСНЫЙ) -->
+        <div class="p-4 bg-red-50 dark:bg-red-900/40 border-2 border-red-300 dark:border-red-700 rounded-xl flex flex-col justify-start transition-colors duration-300">
+            <!-- Надпись -->
+            <span class="text-md text-gray-800 dark:text-gray-200 font-medium mb-1 self-start">Итого Брутто</span>
+            
+            <!-- Сумма: крупная, красная (адаптивная), жирная -->
+            <span id="hourlyGrossSalaryResult" class="text-3xl text-red-700 dark:text-red-400 font-extrabold self-end transition-colors duration-300">0 тг</span>
+        </div>
+    </div>
+    
+    <!-- 4. Подробный график и корректировка -->
+    <div class="card mb-8 bg-tg_card_light dark:bg-tg_card_dark transition-colors duration-300 shadow-md dark:shadow-none dark:border dark:border-gray-700">
+        <h3 class="text-xl font-bold mb-5 text-gray-800 dark:text-gray-200 border-b dark:border-gray-700 pb-2">4. Подробный график и корректировка</h3>
+        <p class="text-xs text-gray-500 dark:text-gray-400 mb-4">Выберите месяц в Разделе 2. Смены можно изменить вручную.</p>
+        <div class="max-h-60 overflow-y-auto border border-gray-200 dark:border-gray-600 rounded-xl shadow-inner dark:shadow-none">
+            <table class="w-full text-sm">
+                <thead>
+                    <tr class="sticky top-0 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 font-semibold shadow-sm transition-colors duration-300">
+                        <!-- Фиксированная ширина для даты -->
+                        <th class="p-3 text-left schedule-table-date">Дата</th>
+                        <!-- Динамическая ширина для смены -->
+                        <th class="p-3 text-left schedule-table-shift">Смена</th>
+                    </tr>
+                </thead>
+                <tbody id="scheduleTableBody" class="text-gray-700 dark:text-gray-300">
+                    <!-- Заполняется JavaScript -->
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+</div>
+
+<script>
+    // --- ГЛОБАЛЬНОЕ СОСТОЯНИЕ И КОНСТАНТЫ (ЛОГИКА НЕ ИЗМЕНЕНА) ---
+    const SHIFT_CYCLE = [
+        { name: "Дневная (Д)", index: 0, colorClass: 'text-shift-0' },
+        { name: "Ночная (Н)", index: 1, colorClass: 'text-shift-1' },
+        { name: "Отсыпной (О)", index: 2, colorClass: 'text-shift-2' },
+        { name: "Выходной (В)", index: 3, colorClass: 'text-shift-3' },
+    ];
+    
+    const SHIFT_SCHEMES = {
+        '5/2_D': {
+            name: "5/2 (Д,Д,Д,Д,Д,В,В)",
+            pattern: [0, 0, 0, 0, 0, 3, 3], 
+            cycleLength: 7,
+            defaultHours: 8,
+        },
+        '2/2_DNOW': {
+            name: "2/2 (Д,Н,О,В) - 11ч",
+            pattern: [0, 1, 2, 3], 
+            cycleLength: 4,
+            defaultHours: 11,
+        },
+        '2/2_DDVV': {
+            name: "2/2 (Д,Д,В,В) - 11ч",
+            pattern: [0, 0, 3, 3], 
+            cycleLength: 4,
+            defaultHours: 11,
+        },
+    };
+    const DEFAULT_SCHEME_KEY = '2/2_DNOW';
+    
+    const ALL_SHIFT_OPTIONS = [
+        { value: -1, name: "По графику" },
+        { value: 0, name: "Дневная (Д)" },
+        { value: 1, name: "Ночная (Н)" },
+        { value: 2, name: "Отсыпной (О)" },
+        { value: 3, name: "Выходной (В)" },
+    ];
+    
+    // Хранилище для ручных изменений смен
+    let modifiedShifts = {};
+
+    const NIGHT_RATE_MULTIPLIER = 1.5;
+
+    // Глобальное состояние для кастомного календаря
+    let currentCalendarDate = new Date();
+    const MONTH_NAMES = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"];
+
+    // --- Утилиты ---
+
+    /**
+     * Форматирует число как денежную сумму с пробелами и округляет до двух знаков после запятой.
+     */
+    function formatCurrency(amount) {
+        // Округляем до двух знаков после запятой, затем форматируем
+        const roundedAmount = Math.round(amount * 100) / 100;
+        return roundedAmount.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+    }
+    
+    /**
+     * Преобразует дату YYYY-MM-DD в DD.MM.YYYY.
+     */
+    function formatDateDisplay(dateStr) {
+        const [year, month, day] = dateStr.split('-');
+        return `${day}.${month}.${year}`;
+    }
+
+    /**
+     * Получает текущую дату в формате YYYY-MM-DD для установки по умолчанию.
+     */
+    function getTodayDateString() {
+        const today = new Date();
+        const year = today.getFullYear();
+        const month = String(today.getMonth() + 1).padStart(2, '0');
+        const day = String(today.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    }
+
+    /**
+     * Очищает ручные переопределения смен.
+     */
+    function clearOverrides() {
+        modifiedShifts = {};
+    }
+
+    // --- Логика Календаря и Смен ---
+
+    function getShiftIndexForDate(date) {
+        const schemeKey = document.getElementById('shiftSchemeSelector').value;
+        const scheme = SHIFT_SCHEMES[schemeKey] || SHIFT_SCHEMES[DEFAULT_SCHEME_KEY];
+
+        if (schemeKey === '5/2_D') {
+            const dayOfWeek = (date.getDay() + 6) % 7; 
+            return scheme.pattern[dayOfWeek];
+        }
+
+        const startDateStr = document.getElementById('startDateInput').value;
+        if (!startDateStr) return 3; 
+
+        const startDate = new Date(startDateStr + 'T12:00:00');
+        const dateAtNoon = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 12);
+        
+        const diffTime = dateAtNoon.getTime() - startDate.getTime();
+        const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
+
+        const indexInCycle = (diffDays % scheme.cycleLength + scheme.cycleLength) % scheme.cycleLength;
+        
+        return scheme.pattern[indexInCycle];
+    }
+
+    function renderCalendar() {
+        const calendarHeader = document.getElementById('calendarMonthYear');
+        const calendarBody = document.getElementById('calendarDays');
+        
+        const currentYear = currentCalendarDate.getFullYear();
+        const currentMonth = currentCalendarDate.getMonth();
+        
+        calendarHeader.textContent = `${MONTH_NAMES[currentMonth]} ${currentYear}`;
+        calendarBody.innerHTML = ''; 
+
+        const firstDayOfMonth = new Date(currentYear, currentMonth, 1);
+        const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
+        
+        let startDayIndex = (firstDayOfMonth.getDay() + 6) % 7; 
+        
+        const selectedDateStr = document.getElementById('startDateInput').value;
+        
+        for (let i = 0; i < startDayIndex; i++) {
+            calendarBody.innerHTML += '<div class="calendar-day day-empty"></div>';
+        }
+
+        for (let day = 1; day <= daysInMonth; day++) {
+            const date = new Date(currentYear, currentMonth, day);
+
+            const monthPadded = String(currentMonth + 1).padStart(2, '0');
+            const dayPadded = String(day).padStart(2, '0');
+            const dateStr = `${currentYear}-${monthPadded}-${dayPadded}`;
+            
+            const plannedShiftIndex = getShiftIndexForDate(date);
+            
+            const finalShiftIndex = modifiedShifts[dateStr] !== undefined && modifiedShifts[dateStr] !== -1
+                ? modifiedShifts[dateStr]
+                : plannedShiftIndex;
+
+            const shiftType = SHIFT_CYCLE.find(s => s.index === finalShiftIndex);
+            const shiftClass = `shift-${shiftType.index}`;
+            const isSelected = dateStr === selectedDateStr ? 'day-selected' : '';
+
+            const shiftLabel = shiftType.name.substring(shiftType.name.indexOf('(') + 1, shiftType.name.indexOf(')'));
+            
+            calendarBody.innerHTML += `
+                <div 
+                    class="calendar-day ${shiftClass} ${isSelected}" 
+                    onclick="selectDate('${dateStr}')"
+                >
+                    ${day}
+                    <div class="day-label">${shiftLabel}</div>
+                </div>
+            `;
+        }
+    }
+
+    function toggleCalendar() {
+        const container = document.getElementById('calendarContainer');
+        const isHidden = container.classList.contains('hidden');
+        
+        if (isHidden) {
+            const selectedDateStr = document.getElementById('startDateInput').value;
+            if (selectedDateStr) {
+                const [year, month, day] = selectedDateStr.split('-');
+                currentCalendarDate = new Date(year, month - 1, day);
+            } else {
+                currentCalendarDate = new Date();
+            }
+            renderCalendar();
+        }
+
+        container.classList.toggle('hidden');
+    }
+
+    function changeMonth(delta) {
+        currentCalendarDate.setMonth(currentCalendarDate.getMonth() + delta);
+        renderCalendar();
+    }
+
+    function selectDate(dateStr) {
+        const display = document.getElementById('startDateDisplay');
+        const input = document.getElementById('startDateInput');
+        
+        input.value = dateStr;
+        display.textContent = formatDateDisplay(dateStr);
+        
+        document.getElementById('calendarContainer').classList.add('hidden');
+        
+        clearOverrides();
+        updateCalculations();
+    }
+
+    function handleShiftOverride(dateKey, newShiftIndex) {
+        if (newShiftIndex === -1) {
+            delete modifiedShifts[dateKey]; 
+        } else {
+            modifiedShifts[dateKey] = newShiftIndex; 
+        }
+        updateCalculations();
+    }
+    
+    function applySchemeDefaults() {
+        const schemeKey = document.getElementById('shiftSchemeSelector').value;
+        const scheme = SHIFT_SCHEMES[schemeKey] || SHIFT_SCHEMES[DEFAULT_SCHEME_KEY];
+        document.getElementById('hoursPerShiftInput').value = scheme.defaultHours;
+        updateCalculations();
+    }
+
+    function updateHoursAndRecalculate() {
+        let hours = parseFloat(document.getElementById('hoursPerShiftInput').value);
+        if (isNaN(hours) || hours <= 0) {
+            document.getElementById('hoursPerShiftInput').value = 1;
+        }
+        updateCalculations();
+    }
+
+    // --- ОСНОВНАЯ ЛОГИКА РАСЧЕТА ---
+
+    function calculateShiftCosts(rate) {
+        const rateFloat = parseFloat(rate) || 0;
+        
+        const nightRate = rateFloat * NIGHT_RATE_MULTIPLIER; // 1.5x
+
+        // Адаптивные цвета для ставок
+        const isDarkMode = document.documentElement.classList.contains('dark');
+        const rateTextColor = isDarkMode ? 'text-gray-100' : 'text-gray-900';
+        const dayShiftColor = isDarkMode ? 'text-green-400' : 'text-green-600';
+        const nightShiftColor = isDarkMode ? 'text-blue-400' : 'text-blue-600';
+
+        document.getElementById('dayShiftCost').innerHTML = 
+            `<span class="${dayShiftColor} font-semibold">☀️ Ставка ДЕНЬ (1.0x):</span> 
+            <span class="font-bold ${rateTextColor} ml-1 flex-shrink-0">${formatCurrency(rateFloat)} тг/час</span>`;
+        document.getElementById('nightShiftCost').innerHTML = 
+            `<span class="${nightShiftColor} font-semibold">🌙 Ставка НОЧЬ (1.5x):</span> 
+            <span class="font-bold ${rateTextColor} ml-1 flex-shrink-0">${formatCurrency(nightRate)} тг/час</span>`;
+            
+        const hoursPerShift = parseFloat(document.getElementById('hoursPerShiftInput').value) || 0; 
+        return { hoursPerShift };
+    }
+
+    function calculateShiftsAndTaxes() {
+        const rateInput = document.getElementById('hourlyRateInput');
+        const startDateInput = document.getElementById('startDateInput');
+        
+        const rate = rateInput.value;
+        const startDateStr = startDateInput.value;
+        const rateFloat = parseFloat(rate) || 0;
+
+        const { hoursPerShift } = calculateShiftCosts(rate);
+
+        if (!startDateStr || rateFloat <= 0 || hoursPerShift <= 0) {
+            // Сброс, если данные невалидны
+            const emptyState = "0";
+            document.getElementById('totalShifts').textContent = emptyState;
+            document.getElementById('hourlyGrossSalaryResult').textContent = "0 тг";
+            document.getElementById('scheduleTableBody').innerHTML = '';
+            document.getElementById('currentMonthName').textContent = 'Месяц';
+            
+            // Сброс детального расчета
+            const elementsToReset = ['totalPaidHours', 'totalNightHours1_5', 'earningBase', 'earningNightPremium', 'dayShiftsCount', 'nightShiftsCount'];
+            elementsToReset.forEach(id => {
+                 const el = document.getElementById(id);
+                 // Используем "0" для счетчиков и "0.00 тг" для сумм
+                 const value = (id.includes('Hours') || id.includes('Shifts')) ? "0" : '0.00 тг';
+                 if (el) el.textContent = value;
+            });
+            return;
+        }
+
+        const calcDate = new Date(startDateStr + 'T12:00:00'); 
+        const year = calcDate.getFullYear();
+        const month = calcDate.getMonth(); 
+        
+        const monthName = calcDate.toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' });
+        document.getElementById('currentMonthName').textContent = monthName.charAt(0).toUpperCase() + monthName.slice(1);
+
+        let dayShiftsCount = 0;
+        let nightShiftsCount = 0;
+        let totalPaidHours = 0; // Общее количество часов (базовая ставка 1.0x)
+        let totalNightHoursPremium = 0; // Общее количество часов для надбавки (0.5x)
+        let tableHTML = '';
+        
+        // 1. РАСЧЕТ ПО СМЕНАМ И ГРАФИКУ
+        const firstDayOfMonth = new Date(year, month, 1);
+        const lastDayOfMonth = new Date(year, month + 1, 0);
+
+        for (let date = new Date(firstDayOfMonth); date <= lastDayOfMonth; date.setDate(date.getDate() + 1)) {
+            const dateKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+            const plannedShiftIndex = getShiftIndexForDate(date);
+            const finalShiftIndex = (modifiedShifts[dateKey] !== undefined && modifiedShifts[dateKey] !== -1)
+                ? modifiedShifts[dateKey]
+                : plannedShiftIndex;
+
+            const finalShift = SHIFT_CYCLE.find(s => s.index === finalShiftIndex);
+            
+            if (finalShift.index === 0) { // Дневная
+                dayShiftsCount++;
+                totalPaidHours += hoursPerShift;
+            } else if (finalShift.index === 1) { // Ночная
+                nightShiftsCount++;
+                totalPaidHours += hoursPerShift;
+                // Ночная надбавка рассчитывается за 8 часов (или меньше, если смена короче)
+                totalNightHoursPremium += Math.min(hoursPerShift, 8); 
+            }
+
+            const dateStrFormatted = date.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
+            
+            // Адаптивные классы для строк таблицы
+            const isModified = modifiedShifts[dateKey] !== undefined && modifiedShifts[dateKey] !== -1;
+            let highlightClass;
+            if (isModified) {
+                highlightClass = 'bg-indigo-100 dark:bg-blue-900/40 font-semibold';
+            } else {
+                highlightClass = 'odd:bg-white even:bg-gray-50 dark:odd:bg-tg_card_dark dark:even:bg-gray-800/50';
+            }
+
+            const selectOptionsHTML = ALL_SHIFT_OPTIONS.map(opt => {
+                const isDefault = opt.value === -1;
+                const isSelected = (isDefault && !isModified) || (opt.value === modifiedShifts[dateKey]);
+                // Удаляем лишние скобки в "По графику" для экономии места
+                const shiftNameText = SHIFT_CYCLE[plannedShiftIndex].name.replace(/\s+\(([^)]+)\)$/, ' ($1)');
+                const finalLabel = isDefault ? `По графику ${shiftNameText}` : opt.name;
+                
+                return `<option value="${opt.value}" ${isSelected ? 'selected' : ''}>${finalLabel}</option>`;
+            }).join('');
+            
+            // Добавляем адаптивные классы для инпута выбора смены
+            const selectBgClass = isDarkMode() ? 'bg-gray-700 text-gray-200' : 'bg-white text-gray-700';
+
+            const shiftDisplayHTML = `
+                <select 
+                    class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm ${finalShift.colorClass} ${selectBgClass} focus:ring-tg_accent dark:focus:ring-tg_dark_accent"
+                    onchange="handleShiftOverride('${dateKey}', parseInt(this.value))"
+                >
+                    ${selectOptionsHTML}
+                </select>`;
+
+            // Используем классы для фиксированной ширины даты и динамической ширины смены
+            tableHTML += `<tr class="${highlightClass} border-b dark:border-gray-700">
+                <td class="p-2 font-medium schedule-table-date">${dateStrFormatted}</td>
+                <td class="p-1 schedule-table-shift">${shiftDisplayHTML}</td>
+            </tr>`;
+        }
+        
+        // --- РАСЧЕТ БРУТТО-ЗП ---
+        
+        // 1. Базовый заработок (Все часы * 1.0x)
+        const earningBase = totalPaidHours * rateFloat; 
+
+        // 2. Ночная надбавка (Часы для надбавки * 0.5x)
+        const earningNightPremium = totalNightHoursPremium * (rateFloat * 0.5);
+
+        // Итоговая БРУТТО-ЗП
+        const hourlyGrossSalary = earningBase + earningNightPremium;
+
+        // --- ОБНОВЛЕНИЕ UI (Сводный отчет) ---
+        document.getElementById('totalShifts').textContent = dayShiftsCount + nightShiftsCount;
+        document.getElementById('dayShiftsCount').textContent = dayShiftsCount;
+        document.getElementById('nightShiftsCount').textContent = nightShiftsCount;
+        document.getElementById('totalPaidHours').textContent = formatCurrency(totalPaidHours);
+        document.getElementById('totalNightHours1_5').textContent = formatCurrency(totalNightHoursPremium);
+        document.getElementById('hourlyGrossSalaryResult').textContent = formatCurrency(hourlyGrossSalary) + " тг";
+        document.getElementById('scheduleTableBody').innerHTML = tableHTML;
+        
+        // Обновление детализации начислений (в объединенном блоке 3)
+        document.getElementById('earningBase').textContent = formatCurrency(earningBase) + " тг";
+        document.getElementById('earningNightPremium').textContent = formatCurrency(earningNightPremium) + " тг";
+        
+        // Обновление календаря
+        if (!document.getElementById('calendarContainer').classList.contains('hidden')) {
+            renderCalendar();
+        }
+    }
+    
+    function isDarkMode() {
+        return document.documentElement.classList.contains('dark');
+    }
+
+    function updateCalculations() {
+        // Проверяем, включен ли темный режим (для корректной работы calculateShiftCosts)
+        if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+            document.documentElement.classList.add('dark');
+        } else {
+            document.documentElement.classList.remove('dark');
+        }
+
+        calculateShiftsAndTaxes();
+    }
+    
+    // Добавляем слушатель для автоматического переключения темы
+    if (window.matchMedia) {
+        window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', event => {
+            if (event.matches) {
+                document.documentElement.classList.add('dark');
+            } else {
+                document.documentElement.classList.remove('dark');
+            }
+            // Пересчет, чтобы обновить адаптивные цвета в JS (в calculateShiftCosts)
+            updateCalculations();
+        });
+    }
+
+    // Инициализация при загрузке страницы
+    window.onload = () => {
+        const todayStr = getTodayDateString();
+        document.getElementById('startDateInput').value = todayStr;
+        document.getElementById('startDateDisplay').textContent = formatDateDisplay(todayStr);
+        
+        const [year, month, day] = todayStr.split('-');
+        currentCalendarDate = new Date(year, month - 1, day);
+
+        applySchemeDefaults();
+        
+        // Инициализация принудительного пересчета и определения темы
+        updateCalculations();
+    };
+
+</script>
+</body>
+</html>
